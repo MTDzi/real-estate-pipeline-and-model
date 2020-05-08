@@ -114,7 +114,8 @@ case "$1" in
       # With the "Local" and "Sequential" executors it should all run in one container.
       airflow scheduler &
     fi
-    python generate_user.py
+#    exec python generate_user.py
+#    exec airflow variables -i variables.json
     exec airflow webserver
     ;;
   worker|scheduler)

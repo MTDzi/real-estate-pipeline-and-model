@@ -1,0 +1,3 @@
+[submodule "otodom_scraper"]
+	path = otodom_scraper
+	url = https://github.com/MTDzi/otodom_scraper
