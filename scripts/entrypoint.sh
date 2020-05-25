@@ -112,10 +112,10 @@ case "$1" in
     airflow initdb
     if [ "$AIRFLOW__CORE__EXECUTOR" = "LocalExecutor" ] || [ "$AIRFLOW__CORE__EXECUTOR" = "SequentialExecutor" ]; then
       # With the "Local" and "Sequential" executors it should all run in one container.
+      airflow variables -i variables.json
       airflow scheduler &
     fi
 #    exec python generate_user.py
-#    exec airflow variables -i variables.json
     exec airflow webserver
     ;;
   worker|scheduler)
@@ -129,6 +129,10 @@ case "$1" in
     ;;
   version)
     exec airflow "$@"
+    ;;
+  jupyterlab)
+    source jupyter_venv/bin/activate
+    exec jupyter-lab --ip=0.0.0.0 --port=42000
     ;;
   *)
     # The command is something like bash, not an airflow subcommand. Just run it in the right environment.

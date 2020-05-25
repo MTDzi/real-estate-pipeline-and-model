@@ -1,5 +1,7 @@
 version: '3.7'
 services:
+
+
     postgres:
         image: postgres:9.6
         environment:
@@ -12,6 +14,7 @@ services:
             options:
                 max-size: 10m
                 max-file: "3"
+
 
     webserver:
         image: puckel/docker-airflow:latest
@@ -34,6 +37,7 @@ services:
             - ./scripts:/usr/local/airflow/scripts
         ports:
             - "8080:8080"
+            - "42000:42000"
         command: webserver
         healthcheck:
             test: ["CMD-SHELL", "[ -f /usr/local/airflow/airflow-webserver.pid ]"]

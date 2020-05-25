@@ -1,14 +1,33 @@
+**NOTE:** this repo is actually a copy of the [`puckel/docker-airflow`](https://github.com/puckel/docker-airflow)
+project, however since I had one [other](https://github.com/MTDzi/data_nanodegree_project_5) repo that's also its fork,
+and I didn't want this project to be merely a branch of that other repo, I made a hard copy and
+now you're looking at it.
+
 # Introduction
 
-This repo contains a solution for the Data Engineering Project 5: Data Pipelines (in Airflow).
+This project is comprised of three main components which correspond to three Airflow DAGs:
+1. A daily scraping job defined in `dags/otodom_scraping_dag.py` that scrapes the **`otodom.pl`** website for real estate in several
+   Polish cities, among others: Warsaw (Warszawa), and Cracow (Kraków). The result of this scraping is a CSV file that
+   is then pushed to an S3 bucket on AWS (which is also a part of this DAG).
+2. A weekly data cleaning pipeline defined in `dags/emr_cleanup_dag.py` that spins up an EMR cluster on which several Spark
+   jobs are ran that clean up the data, find and remove duplicates, and load the data back to the S3 data lake.
+3. A weekly pipeline for training a model defined in `dags/training_dag.py` whose primary purpose is *not* to train a
+   model, but rather to create an analysis based on the embeddings that this model provides. 
 
-It's a fork of the `puckel/docker-airflow` repo but contains many changes that allowed me to use it for this project.
-Among others:
-1) it contains the Operators needed for the project's DAG to run
-2) it uses Fernet encryption to ensure the passwords and variables are, well, encrypted
-3) it makes use of the authentication feature (which doesn't make much sense when working locally, but the plan is to use it later on in the Capstone Project)
+More details about each of this components are given below.
 
 ## How to build the `docker-airflow` image
+
+### Before you build it
+
+In this repo's main directory run:
+
+    git submodule init
+    git submodule update
+    
+to get the `otodom_scraper` repo which contains scripts for scraping the real estate data. BTW, I'm running the scraper
+by using the `BashOperator`, which in turn needs to run within a virtualenv (that contains scrapy, for example) which is
+being set up in the Dockerfile.
 
 Since I'm using the [`airflow.providers.amazon.aws`](https://airflow.readthedocs.io/en/latest/_api/airflow/providers/amazon/aws/operators/index.html),
 subpackage, I'm building the image with an additional `AIRFLOW_DEPS`, like so: 
@@ -20,11 +39,6 @@ subpackage, I'm building the image with an additional `AIRFLOW_DEPS`, like so:
         --build-arg AIRFLOW_UI_PASSWORD="some_password" \
         -t puckel/docker-airflow .
     
-## The main DAG
-
-The main DAG is defined in the `dags/project_5_dag.py` file. This is its Graph View:
-
-![](./images/example-dag.png)
 
 ## IaC for setting up the Redshift service
 

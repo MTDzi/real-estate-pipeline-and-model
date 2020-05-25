@@ -3,7 +3,7 @@ import json
 import requests
 from typing import List, Dict, Any, Tuple
 
-# import pyproj
+import pyproj
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -11,10 +11,11 @@ import matplotlib.pyplot as plt
 
 TILE_SIDE = 200
 MAP_URL = 'http://mapa.um.warszawa.pl/mapviewer/foi'
+PROJECTION_RECIPE = '+proj=tmerc +lat_0=0 +lon_0=21 +k=0.999923 +x_0=7500000 +y_0=0 +ellps=GRS80 +units=m +no_defs'
 
 # Roughly Warsaw box coordinates
-BOUND_UP = (7489046, 5801540)
-BOUND_DOWN = (7518990, 5774703)
+BOUND_UP = [7489046, 5801540]
+BOUND_DOWN = [7518990, 5774703]
 
 
 def fix_json(request_data: str) -> str:
@@ -66,24 +67,28 @@ def project(proj: pyproj.Proj, x: float, y: float) -> Tuple[float, float]:
 
 
 @click.command()
-@click.option('--map_url', '-m', type=str, required=True)
-@click.option('--projection_recipe', '-p', type=str, required=True)
-@click.option('--tile_side', '-t', type=str, required=True)
-@click.option('--bound_up', '-u', type=str, requests=True)
-@click.option('--bound_down', '-d', type=str, requests=True)
-@click.option('--csv_dump_filename', '-o', type=str, requests=True)
+@click.option('--csv-dump-filename', '-o', type=str, required=True)
+@click.option('--tile-side', '-t', type=int, default=2000)
+@click.option('--map-url', '-m', type=str, default=MAP_URL)
+@click.option('--projection-recipe', '-p', type=str, default=PROJECTION_RECIPE)
+@click.option('--bound-up', '-u', multiple=True, default=BOUND_UP)
+@click.option('--bound-down', '-d', multiple=True, default=BOUND_DOWN)
 def scrape_population_density(
+        csv_dump_filename: str,
+        tile_side: int,
         map_url: str,
         projection_recipe: str,
-        tile_side: int,
         bound_up: List[int],
         bound_down: List[int],
-        csv_dump_filename: str,
 ) -> None:
     proj = pyproj.Proj(projection_recipe)
     data = []
-    for long in range(bound_up[0], bound_down[0], tile_side):
-        for lat in reversed(range(bound_down[1], bound_up[1], tile_side)):
+    longitudes = list(range(bound_up[0], bound_down[0], tile_side))
+    latitudes = list(range(bound_down[1], bound_up[1], tile_side))
+    counter = 0
+    print('Scraping Warsaw\'s map for population density')
+    for long in longitudes:
+        for lat in reversed(latitudes):
             bbox = [
                 long,             lat - tile_side,
                 long + tile_side, lat
@@ -111,6 +116,9 @@ def scrape_population_density(
                     new_row[key] /= len(list_of_data)
 
             data.append(new_row)
+            counter += 1
+            if counter % 100 == 0:
+                print(f'{counter} of {len(longitudes)*len(latitudes)} done')
 
     frame = pd.DataFrame(data)
 
@@ -124,4 +132,4 @@ def scrape_population_density(
 
 
 if __name__ == '__main__':
-    pass
+    scrape_population_density()

@@ -1,0 +1,12 @@
+version: '3.7'
+services:
+
+    jupyterlab:
+        image: puckel/docker-airflow:latest
+        restart: always
+        volumes:
+            - ./scraped_csvs:/usr/local/airflow/scraped_csvs
+            - ./scripts:/usr/local/airflow/scripts
+        ports:
+            - "42000:42000"
+        command: jupyterlab

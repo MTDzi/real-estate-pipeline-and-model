@@ -32,6 +32,11 @@ ENV LC_ALL en_US.UTF-8
 ENV LC_CTYPE en_US.UTF-8
 ENV LC_MESSAGES en_US.UTF-8
 
+# Spark dependencies
+ENV APACHE_SPARK_VERSION=2.4.5 \
+    HADOOP_VERSION=2.7
+
+
 # Disable noisy "Handling signal" log messages:
 # ENV GUNICORN_CMD_ARGS --log-level WARNING
 
@@ -57,6 +62,12 @@ RUN set -ex \
         rsync \
         netcat \
         locales \
+        software-properties-common \
+        dirmngr \
+        apt-transport-https \
+        lsb-release \
+        ca-certificates \
+        gnupg \
     && sed -i 's/^# en_US.UTF-8 UTF-8$/en_US.UTF-8 UTF-8/g' /etc/locale.gen \
     && locale-gen \
     && update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
@@ -74,6 +85,7 @@ RUN set -ex \
     && pip install ipython==7.13.0 \
     && pip install boto3==1.12.41 \
     && pip install sagemaker==1.55.4 \
+    && pip install pyarrow==0.17.1 \
     # Below, I'm not specifying the version intentionally so that any
     #  critical security updates are incorporated. The version that I worked with
     #  as of typing this was: 0.7.1
@@ -90,15 +102,76 @@ RUN set -ex \
         /usr/share/doc \
         /usr/share/doc-base
 
-COPY script/entrypoint.sh /entrypoint.sh
-COPY script/generate_user.py ${AIRFLOW_USER_HOME}/generate_user.py
+# Install Java
+RUN mkdir -p /usr/share/man/man1
+RUN echo "deb http://security.debian.org/debian-security stretch/updates main" >> /etc/apt/sources.list
+RUN mkdir -p /usr/share/man/man1 && \
+    apt-get update -y && \
+    apt-get install -y openjdk-8-jdk
+
+RUN apt-get install unzip -y && \
+    apt-get autoremove -y
+
+RUN apt update && apt install -y wget
+
+RUN cd /tmp && \
+    wget -q $(wget -qO- https://www.apache.org/dyn/closer.lua/spark/spark-${APACHE_SPARK_VERSION}/spark-${APACHE_SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz\?as_json | \
+    python -c "import sys, json; content=json.load(sys.stdin); print(content['preferred']+content['path_info'])") && \
+    echo "2426a20c548bdfc07df288cd1d18d1da6b3189d0b78dee76fa034c52a4e02895f0ad460720c526f163ba63a17efae4764c46a1cd8f9b04c60f9937a554db85d2 *spark-${APACHE_SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz" | sha512sum -c - && \
+    tar xzf spark-${APACHE_SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz -C /usr/local --owner root --group root --no-same-owner && \
+    rm spark-${APACHE_SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz
+RUN cd /usr/local && ln -s spark-${APACHE_SPARK_VERSION}-bin-hadoop${HADOOP_VERSION} spark
+
+# Spark and Mesos config
+ENV SPARK_HOME=/usr/local/spark
+ENV PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.7-src.zip \
+    MESOS_NATIVE_LIBRARY=/usr/local/lib/libmesos.so \
+    SPARK_OPTS="--driver-java-options=-Xms1024M --driver-java-options=-Xmx4096M --driver-java-options=-Dlog4j.logLevel=info" \
+    PATH=$PATH:$SPARK_HOME/bin
+
+
+WORKDIR ${AIRFLOW_USER_HOME}
+
+
+# The following is from: https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
+ENV OLD_PATH=$PATH
+
+COPY config/scraper_requirements.txt ${AIRFLOW_USER_HOME}/scraper_requirements.txt
+ENV VIRTUAL_ENV=${AIRFLOW_USER_HOME}/scraper_venv
+RUN python -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$OLD_PATH"
+RUN pip install -r scraper_requirements.txt
+
+COPY config/jupyter_requirements.txt ${AIRFLOW_USER_HOME}/jupyter_requirements.txt
+ENV VIRTUAL_ENV=${AIRFLOW_USER_HOME}/jupyter_venv
+RUN python -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$OLD_PATH"
+RUN pip install -r jupyter_requirements.txt
+
+ENV PATH=$OLD_PATH
+
+# Spark-related environmental variables
+ENV PYSPARK_DRIVER_PYTHON ipython
+ENV PYTHONIOENCODING utf8
+ENV PYTHONPATH $SPARK_HOME/python:$SPARK_HOME/python/lib
+ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64
+ENV PATH $SPARK_HOME:$SPARK_HOME/bin:$PATH:$JAVA_HOME/bin:$JAVA_HOME/jre
+
+
 COPY config/airflow.cfg ${AIRFLOW_USER_HOME}/airflow.cfg
+COPY config/variables.json ${AIRFLOW_USER_HOME}/variables.json
+
+ADD otodom_scraper ${AIRFLOW_USER_HOME}/otodom_scraper
+RUN mkdir ${AIRFLOW_USER_HOME}/scraped_csvs
+
+COPY scripts/entrypoint.sh /entrypoint.sh
+COPY scripts/generate_user.py ${AIRFLOW_USER_HOME}/generate_user.py
 
 RUN chown -R airflow: ${AIRFLOW_USER_HOME}
 
-EXPOSE 8080 5555 8793
+EXPOSE 8080 5555 8793 42000
 
 USER airflow
-WORKDIR ${AIRFLOW_USER_HOME}
+
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["webserver"]
