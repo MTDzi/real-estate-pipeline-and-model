@@ -7,6 +7,7 @@ services:
         volumes:
             - ./scraped_csvs:/usr/local/airflow/scraped_csvs
             - ./scripts:/usr/local/airflow/scripts
+            - ./notebooks:/usr/local/airflow/notebooks
         ports:
             - "42000:42000"
         command: jupyterlab

@@ -14,7 +14,7 @@
     "schedule_interval": null,
     "city": "Warszawa",
     "csv_path": "/usr/local/airflow/scraped_csvs/",
-    "parquet_path": "/usr/local/airflow/scraped_csvs/parquets",
+    "parquet_path": "/usr/local/airflow/scraped_csvs/parquets/",
     "s3_bucket": "real-estate-project",
     "critical_null_percentage": 90,
     "warning_null_percentage": 50
@@ -23,9 +23,16 @@
   "warsaw_map_scraping": {
     "schedule_interval": null,
     "tile_side": 200,
+
+    "COMMENT_ON_BOUNDS": "this is roughly a rectangle that encompasses the whole city of Warsaw",
     "bound_up": [7489046, 5801540],
     "bound_down": [7518990, 5774703],
-    "csv_dump_filename": "/usr/local/airflow/scraped_csvs/warsaw_map_population_density.csv",
-    "s3_bucket": "real-estate-project"
+
+    "csv_dump_filepath": "/usr/local/airflow/scraped_csvs/warsaw_map_population_density.csv",
+    "parquet_dump_filepath": "/usr/local/airflow/scraped_csvs/parquets/warsaw_map_population_density.parquet",
+
+    "s3_bucket": "real-estate-project",
+    "critical_null_percentage": 0,
+    "warning_null_percentage": 0
   }
 }

@@ -5,6 +5,7 @@ from airflow.operators.bash_operator import BashOperator
 from airflow.operators.python_operator import PythonOperator
 
 from args_utils import get_default_args
+from quality_checks import check_nullability, check_if_file_exists
 
 import pandas as pd
 from pathlib import Path
@@ -13,6 +14,14 @@ import logging
 
 
 default_args = get_default_args()
+
+# The DAG will need the following file to exist at later stages, it doesn't
+#  make sense to run the scraping if the file doesn't exist
+required_warsaw_map_parquet_filepath = Variable.get(
+    'warsaw_map_scraping',
+    deserialize_json=True,
+)['parquet_dump_filepath']
+
 dag_specific_vars = Variable.get('otodom_scraping', deserialize_json=True)
 
 city = dag_specific_vars['city']
@@ -51,37 +60,6 @@ def csv_dedup_and_to_parquet(
         parquet_filepath,
         index=False,
     )
-
-
-def check_nullability(
-        parquet_filepath: Path,
-        critical_null_percentage: float,
-        warning_null_percentage: float,
-) -> None:
-    """
-    This function:
-        1) reads in the parquet_filepath
-        2) calculates the percentages of null values for each column
-        3) checks which (if any) columns have more than critica_null_percentage null values
-        4)  checks which (if any) columns have more than warning_null_percentage null values
-    """
-    df = pd.read_parquet(parquet_filepath)
-    null_percentages_per_column = 100 * df.isnull().mean().round(2)
-    above_critical = (null_percentages_per_column > critical_null_percentage)
-    if any(above_critical):
-        error_msg = (
-            f'The following columns had more than {critical_null_percentage}% values missing:\n'
-            f'{df.columns[above_critical == True].tolist()}'
-        )
-        raise ValueError(error_msg)
-
-    above_warning = (null_percentages_per_column > warning_null_percentage)
-    if any(above_warning):
-        warning_msg = (
-            f'The following columns had more than {warning_null_percentage}% values missing:\n'
-            f'{df.columns[above_warning == True].tolist()}'
-        )
-        logging.warning(warning_msg)
 
 
 def column_renaming(parquet_filepath: Path) -> None:
@@ -129,13 +107,25 @@ dag = DAG(
     schedule_interval=dag_specific_vars['schedule_interval'],
 )
 
-scrape_task = BashOperator(
+check_if_file_exists_task = PythonOperator(
     dag=dag,
-    task_id='run_scrapy_on_otodom',
+    task_id='check_if_file_exists_task',
+    python_callable=lambda: check_if_file_exists(
+        required_warsaw_map_parquet_filepath,
+        additional_message='!!! You should first run the "warsaw_map_scraping_dag" !!!\n',
+    ),
+)
+
+otodom_scraping_task = BashOperator(
+    dag=dag,
+    task_id='otodom_scraping_task',
     bash_command=(
-        'cd /usr/local/airflow/otodom_scraper/;'
-        f' ../scraper_venv/bin/scrapy crawl otodomSpider -o {csv_filepath} -a city={city}'
-        ' &> /dev/null'
+        f'if test -f {csv_filepath};'
+        f'then echo "The file {csv_filepath} exists, not scraping otodom"'
+        f'else;'
+        f'cd /usr/local/airflow/otodom_scraper/;'
+        f'../scraper_venv/bin/scrapy crawl otodomSpider -o {csv_filepath} -a city={city} &> /dev/null;'
+        f'fi'
     ),
 )
 
@@ -161,5 +151,5 @@ column_renaming_task = PythonOperator(
     python_callable=lambda: column_renaming(parquet_filepath),
 )
 
-scrape_task >> csv_dedup_and_to_parquet_task >> check_nullability_task >> column_renaming_task
+check_if_file_exists_task >> otodom_scraping_task >> csv_dedup_and_to_parquet_task >> check_nullability_task >> column_renaming_task
 
