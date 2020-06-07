@@ -31,8 +31,6 @@
     "csv_dump_filepath": "/usr/local/airflow/scraped_csvs/warsaw_map_population_density.csv",
     "parquet_dump_filepath": "/usr/local/airflow/scraped_csvs/parquets/warsaw_map_population_density.parquet",
 
-    "s3_bucket": "real-estate-project",
-    "critical_null_percentage": 0,
-    "warning_null_percentage": 0
+    "s3_bucket": "real-estate-project"
   }
 }

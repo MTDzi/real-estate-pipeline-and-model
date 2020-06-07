@@ -1,6 +1,6 @@
 docker build \
   --rm \
-  --no-cache \
+#  --no-cache \
   --build-arg AIRFLOW_DEPS="aws" \
   --build-arg AIRFLOW_UI_USER="MTDzi" \
   --build-arg AIRFLOW_UI_PASSWORD="uwolnic_tchorzofretk1" \

@@ -6,6 +6,7 @@ from airflow.operators.python_operator import PythonOperator
 
 from args_utils import get_default_args
 from quality_checks import check_nullability, check_if_file_exists
+from rough_join import find_closest_density
 
 import pandas as pd
 from pathlib import Path
@@ -60,6 +61,22 @@ def csv_dedup_and_to_parquet(
         parquet_filepath,
         index=False,
     )
+
+
+def rough_join_with_map_data(
+    otodom_scrape_parquet_filepath: Path,
+    warsaw_map_parquet_filepath: Path,
+) -> None:
+    logging.info('Reading in the otodom and the warsaw map parquet files')
+    otodom_df = pd.read_parquet(otodom_scrape_parquet_filepath)
+    popul_dens_df = pd.read_parquet(warsaw_map_parquet_filepath)
+    logging.info('Adding the "population_density" column to the otodom frame')
+    otodom_df['population_density'] = (
+        otodom_df[['lon', 'lat']]
+        .apply(lambda row: find_closest_density(row, popul_dens_df), axis=1)
+    )
+    logging.info(f'Done, now saving the results to {otodom_scrape_parquet_filepath}')
+    otodom_df.to_parquet(otodom_scrape_parquet_filepath, index=False)
 
 
 def column_renaming(parquet_filepath: Path) -> None:
@@ -121,10 +138,8 @@ otodom_scraping_task = BashOperator(
     task_id='otodom_scraping_task',
     bash_command=(
         f'if test -f {csv_filepath};'
-        f'then echo "The file {csv_filepath} exists, not scraping otodom"'
-        f'else;'
-        f'cd /usr/local/airflow/otodom_scraper/;'
-        f'../scraper_venv/bin/scrapy crawl otodomSpider -o {csv_filepath} -a city={city} &> /dev/null;'
+        f'then echo "The file {csv_filepath} exists, not scraping otodom";'
+        f'else cd /usr/local/airflow/otodom_scraper/;../scraper_venv/bin/scrapy crawl otodomSpider -o {csv_filepath} -a city={city} &> /dev/null;'
         f'fi'
     ),
 )
@@ -145,11 +160,25 @@ check_nullability_task = PythonOperator(
     ),
 )
 
+rough_join_with_map_data_task = PythonOperator(
+    dag=dag,
+    task_id='rough_join_with_map_data_task',
+    python_callable=lambda: rough_join_with_map_data(
+        parquet_filepath,
+        required_warsaw_map_parquet_filepath,
+    )
+)
+
 column_renaming_task = PythonOperator(
     dag=dag,
     task_id='column_renaming_task',
     python_callable=lambda: column_renaming(parquet_filepath),
 )
 
-check_if_file_exists_task >> otodom_scraping_task >> csv_dedup_and_to_parquet_task >> check_nullability_task >> column_renaming_task
+check_if_file_exists_task \
+    >> otodom_scraping_task \
+    >> csv_dedup_and_to_parquet_task \
+    >> check_nullability_task \
+    >> rough_join_with_map_data_task \
+    >> column_renaming_task
 
