@@ -15,7 +15,7 @@ csv_dump_filepath = dag_specific_vars['csv_dump_filepath']
 parquet_dump_filepath = dag_specific_vars['parquet_dump_filepath']
 
 
-def cleanup_and_to_parquet(
+def population_density_extraction(
         csv_filepath: str,
         parquet_filepath: str,
 ) -> None:
@@ -44,19 +44,19 @@ warsaw_map_scraping_task = BashOperator(
     task_id='warsaw_map_scraping_task',
     bash_command=(
         f'if test -f {csv_dump_filepath};'
-        f'then echo "The file {csv_dump_filepath} exists, not scraping warsaw.map.um";'
+        f'then echo "The file {csv_dump_filepath} exists, not scraping http://mapa.um.warszawa.pl/";'
         f'else cd /usr/local/airflow/scripts/;../scraper_venv/bin/python warsaw_map_scraper.py -o {csv_dump_filepath} -t {tile_side};'
         f'fi'
     ),
 )
 
-cleanup_and_to_parquet_task = PythonOperator(
+population_density_extraction_task = PythonOperator(
     dag=dag,
-    task_id='cleanup_and_to_parquet_task',
-    python_callable=lambda: cleanup_and_to_parquet(
+    task_id='population_density_extraction_task',
+    python_callable=lambda: population_density_extraction(
         csv_dump_filepath,
         parquet_dump_filepath,
     ),
 )
 
-warsaw_map_scraping_task >> cleanup_and_to_parquet_task
+warsaw_map_scraping_task >> population_density_extraction_task

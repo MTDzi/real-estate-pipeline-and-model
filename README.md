@@ -6,12 +6,16 @@ now you're looking at it.
 # Introduction
 
 This project is comprised of three main components which correspond to three Airflow DAGs:
-1. A daily scraping job defined in `dags/otodom_scraping_dag.py` that scrapes the **`otodom.pl`** website for real estate in several
-   Polish cities, among others: Warsaw (Warszawa), and Cracow (Kraków). The result of this scraping is a CSV file that
-   is then pushed to an S3 bucket on AWS (which is also a part of this DAG).
-2. A weekly data cleaning pipeline defined in `dags/emr_cleanup_dag.py` that spins up an EMR cluster on which several Spark
+1. A daily scraping job defined in `dags/otodom_scraping_dag.py` that scrapes the **`otodom.pl`** website for real estate
+   deals in Warsaw (Poland). The result of this scraping is a CSV file that is then de-duplicated, cleaned up, joined with
+   dataset containing population density, and finally the resulting data frame has its columns renamed (translated to English),
+   to then be dumped as a .parquet file. This is the DAG as seen in Airflow's Graph View ![](images/otodom_dag.png)
+2. An on-demand pipeline for scraping the **`mapa.um.warszawa.pl`** website. This is a simple DAG, comprised of two tasks:
+   the first one scrapes the website using the Python `requests` package, and the second task cleans up the data and dumps
+   them into a .parquet file. This is the DAG as seen in Airflow's Graph View ![](images/warsaw_map_dag.png)
+3. A weekly pipeline defined in `dags/emr_cleanup_dag.py` that spins up an EMR cluster on which several Spark
    jobs are ran that clean up the data, find and remove duplicates, and load the data back to the S3 data lake.
-3. A weekly pipeline for training a model defined in `dags/training_dag.py` whose primary purpose is *not* to train a
+3. An on-demand pipeline for training a model defined in `dags/training_dag.py` whose primary purpose is *not* to train a
    model, but rather to create an analysis based on the embeddings that this model provides. 
 
 More details about each of this components are given below.

@@ -1,7 +1,7 @@
 {
   "default_args": {
     "owner": "MTDzi",
-    "start_date_list": [2020, 4, 15],
+    "start_date_list": [2019, 12, 1],
     "email": ["mtdziubinski@gmail.com"],
     "email_on_failure": false,
     "email_on_retry": false,
@@ -11,7 +11,7 @@
   },
 
   "otodom_scraping": {
-    "schedule_interval": null,
+    "schedule_interval": "@daily",
     "city": "Warszawa",
     "csv_path": "/usr/local/airflow/scraped_csvs/",
     "parquet_path": "/usr/local/airflow/scraped_csvs/parquets/",

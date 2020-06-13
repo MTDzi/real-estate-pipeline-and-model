@@ -16,7 +16,7 @@ import logging
 
 default_args = get_default_args()
 
-# The DAG will need the following file to exist at later stages, it doesn't
+# The DAG will need the following file to exist at later tasks, it doesn't
 #  make sense to run the scraping if the file doesn't exist
 required_warsaw_map_parquet_filepath = Variable.get(
     'warsaw_map_scraping',
@@ -114,7 +114,22 @@ def column_renaming(parquet_filepath: Path) -> None:
         'winda': 'elevator',
     }
     df = pd.read_parquet(parquet_filepath)
-    df.rename(column_name_translation).to_parquet(parquet_filepath)
+    df.rename(columns=column_name_translation, inplace=True)
+    df.to_parquet(parquet_filepath)
+
+
+def column_selection(parquet_filepath: Path) -> None:
+    """
+    This function drops descriptive columns, meaning: those on which I would need
+    to use some more sophisticated NLP methods to extract any useful information.
+    """
+    columns_to_drop = [
+        'opis',
+        'title',
+    ]
+    df = pd.read_parquet(parquet_filepath)
+    df.drop(columns_to_drop, axis=1, inplace=True)
+    df.to_parquet(parquet_filepath)
 
 
 dag = DAG(
@@ -175,10 +190,17 @@ column_renaming_task = PythonOperator(
     python_callable=lambda: column_renaming(parquet_filepath),
 )
 
+column_selection_task = PythonOperator(
+    dag=dag,
+    task_id='column_selection_task',
+    python_callable=lambda: column_selection(parquet_filepath),
+)
+
 check_if_file_exists_task \
     >> otodom_scraping_task \
     >> csv_dedup_and_to_parquet_task \
     >> check_nullability_task \
     >> rough_join_with_map_data_task \
-    >> column_renaming_task
+    >> column_renaming_task \
+    >> column_selection_task
 
