@@ -9,19 +9,109 @@ This project is comprised of three main components which correspond to three Air
 1. A daily scraping job defined in `dags/otodom_scraping_dag.py` that scrapes the **`otodom.pl`** website for real estate
    deals in Warsaw (Poland). The result of this scraping is a CSV file that is then de-duplicated, cleaned up, joined with
    dataset containing population density, and finally the resulting data frame has its columns renamed (translated to English),
-   to then be dumped as a .parquet file. This is the DAG as seen in Airflow's Graph View ![](images/otodom_dag.png)
+   to then be dumped as a .parquet file. Each CSV is roughly ~30MB large, and contains about 30.000 rows of data.
+   This is the DAG as seen in Airflow's Graph View ![](images/otodom_dag.png)
 2. An on-demand pipeline for scraping the **`mapa.um.warszawa.pl`** website. This is a simple DAG, comprised of two tasks:
    the first one scrapes the website using the Python `requests` package, and the second task cleans up the data and dumps
-   them into a .parquet file. This is the DAG as seen in Airflow's Graph View ![](images/warsaw_map_dag.png)
+   them into a .parquet file.
+   This is the DAG as seen in Airflow's Graph View ![](images/warsaw_map_dag.png)
 3. A weekly pipeline defined in `dags/spark_dedup_dag.py` that takes the .parquet files produced thus far, and combines
-   them into a single .parquet file with deduplicated rows (using the `link` column). TODO: This is how... 
+   them into a single .parquet file with deduplicated rows (using the `link` column).
+   This is the DAG as seen in Airflow's Graph View ![](images/spark_dedup_dag.png)
+   
+## Purpose
+The purpose of this project was to create a pipeline that scrapes data from two sources, combines them, cleanes them up,
+and stores to be then used to train a machine learning model that, for example, assesses the price of a real estate.
+The data are also deduplicated using Spark (which was needed since the whole data no longer fits in memory), and eventually
+stored as a single frame, again, in a .parquet file.
+   
+## Data model
+The data model is a single table stored as a .parquet file in a data lake that has the following layout (this is a transposed view generated
+with the following command: `print(final_frame.head(3).T.to_markdown())`):
 
-More details about each of this components are given in the sections that follow, but first, we take a look
-at some basic setup instructions.
+|                              | 0                                                                                  | 1                                                                                    | 2                                                               |
+|:-----------------------------|:-----------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------|:----------------------------------------------------------------|
+| address                      | Warszawa, Wilanów, Zawady, Bruzdowa                                                | Warszawa, Ochota, al. Aleje Jerozolimskie                                            | Warszawa, Śródmieście, Żelazna                                  |
+| balcony                      | 1                                                                                  | 0                                                                                    | 0                                                               |
+| price                        | 860540.0                                                                           | 482553                                                                               | 560000.0                                                        |
+| rent                         |                                                                                    | nan                                                                                  |                                                                 |
+| scraped_at                   | 2020-01-03 13:10:48.931666                                                         | 2020-05-01 19:34:08.916578                                                           | 2020-05-19 08:45:52.136266                                      |
+| antiburglar_door_windows     | 0                                                                                  | 0                                                                                    | 0                                                               |
+| two_floors                   | 0                                                                                  | 0                                                                                    | 0                                                               |
+| form_of_property             | pełna własność                                                                     | nan                                                                                  | pełna własność                                                  |
+| garage_parking_spot          | 1                                                                                  | 1                                                                                    | 0                                                               |
+| air_conditioning             | 0                                                                                  | 0                                                                                    | 0                                                               |
+| lat                          | 52.17229575                                                                        | 52.2032596                                                                           | 52.234668799999994                                              |
+| number_of_floors_in_building | 2.0                                                                                | nan                                                                                  | 12.0                                                            |
+| number_of_rooms              | 5                                                                                  | 2                                                                                    | 2                                                               |
+| link                         | https://www.otodom.pl/oferta/101mkw-5-pokoi-duzy-taras-wilanow-zawady-ID441Ca.html | https://www.otodom.pl/oferta/2-luksus-pokoje-inwestycja-z-duzym-rabatem-ID45DLz.html | https://www.otodom.pl/oferta/2-pok-37-5-m2-centrum-ID45TAx.html |
+| lon                          | 21.1126586                                                                         | 20.938595                                                                            | 20.9907818                                                      |
+| building_material            | nan                                                                                | nan                                                                                  | nan                                                             |
+| surveillance_security        | 0                                                                                  | 0                                                                                    | 0                                                               |
+| separate_kitchen             | 0                                                                                  | 0                                                                                    | 0                                                               |
+| garden                       | 0                                                                                  | 0                                                                                    | 0                                                               |
+| type_of_heating              | nan                                                                                | nan                                                                                  | miejskie                                                        |
+| type_of_windows              | plastikowe                                                                         | nan                                                                                  | plastikowe                                                      |
+| floor                        | 2                                                                                  | 1                                                                                    | nan                                                             |
+| basement                     | 0                                                                                  | 0                                                                                    | 0                                                               |
+| storage_room                 | 0                                                                                  | 0                                                                                    | 0                                                               |
+| area_in_m2                   | 101.24                                                                             | 51.61                                                                                | 37.5                                                            |
+| type_of_building             | apartamentowiec                                                                    | apartamentowiec                                                                      | blok                                                            |
+| construction_year            | 2021.0                                                                             | nan                                                                                  |                                                                 |
+| market                       | pierwotny                                                                          | pierwotny                                                                            | wtórny                                                          |
+| finish                       | do wykończenia                                                                     | do wykończenia                                                                       | nan                                                             |
+| alarm_system                 | 0                                                                                  | 0                                                                                    | 0                                                               |
+| terrace                      | 0                                                                                  | 0                                                                                    | 0                                                               |
+| closed_area                  | 0                                                                                  | 0                                                                                    | 0                                                               |
+| elevator                     | 0                                                                                  | 0                                                                                    | 0                                                               |
+| population_density           | 0.6705883045991261                                                                 | 0.45254907011985773                                                                  | 0.11458975076675415                                             |
 
-## How to build the `docker-airflow` image
+### What if the data was increased 100x ?
+There are two stages which might be impacted by this:
+1. The scraping stage
+2. The Spark deduplication
 
-### Before you build it
+For the first stage, the CSV file produced would change its size from ~30MB to ~3GB which is still within the range
+that would easily fit into memory. However, if this was a limiting factor, I would need to modify the scraping
+module that's being used as backend (https://github.com/pixinixi/otodom_scraper), and since I've already contributed
+to this project this shouldn't be a problem.
+
+For the second stage, the duplication is being done on Spark DataFrames, where one of those frames comprises
+data coming from a one day scrape of the otodom.pl website, and the second is the combined data thus far.
+The firs frame is, again, about ~30MB in size, and the second is constantly growing, and currently is at about 500MB.
+On the one hand, Spark can easily deal with this amount of data, and even if we had to process correspondingly
+~3GB and 50GB of data, this would not be an issue. One the other hand, the current approach is not optimal
+and can be made more efficient by using the [Delta Lake](https://docs.databricks.com/delta/delta-intro.html) Spark library.
+
+### What if the pipeline were to run every day, at 7 am?
+This is not a problem since I used Airflow for scheduling.
+
+### What if the database needed to be accessed by 100+ people?
+Since the data are stored as a data lake, this is not an issue in the sense that the data will be available.
+The users wouldn't be able to directly modify the data, but they would be able to analyze them.
+However, as a data lake it would require an ELT pipeline, which would require computational resources in the form of an
+EMR cluster or, more broadly, a Spark cluster for loading these data.
+
+## Future work
+Currently, the pipeline runs on a local machine, within a docker container spun up with `docker-compose`.
+The scraped CSV files and processed .parquet files are stored locally, instead of an S3 bucket because I wanted to avoid additional costs.
+Also, the Spark job is being done locally, within the container.
+
+Future work includes:
+0. Using Data Lakes for the Spark upsert job
+1. Pushing the resulting .parquet files to an actual S3 bucket
+2. Spinning up an EMR cluster for running the spark job for deduplication
+3. Deploying Airflow to ECS and have the whole scheduling done on cloud
+   
+As mentioned, I wanted to avoid additional costs, but the solution was implemented with these three steps in mind.
+The most difficult part would be the 3rd point.
+
+For now, my plan is to share this solution with others in a blog post, and then expand on it by moving it step-by-step
+to the cloud.
+
+# How to build the `docker-airflow` image
+
+## Before you build it
 
 In this repo's main directory run:
 
@@ -46,6 +136,12 @@ The "some_user_name" and its corresponding password "some_password" will be need
 ## Get it to run
 
 There's a script, `all_in_one.sh`, that does all the work, check it out to see the steps.
+
+## More about the DAGs
+
+
+
+---
 
 **What follows is the original README from the `puckle/docker-airflow` repo.**
 
