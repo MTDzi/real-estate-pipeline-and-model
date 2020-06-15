@@ -7,14 +7,6 @@ import pandas as pd
 from args_utils import get_default_args
 
 
-default_args = get_default_args()
-dag_specific_vars = Variable.get('warsaw_map_scraping', deserialize_json=True)
-
-tile_side = dag_specific_vars['tile_side']
-csv_dump_filepath = dag_specific_vars['csv_dump_filepath']
-parquet_dump_filepath = dag_specific_vars['parquet_dump_filepath']
-
-
 def population_density_extraction(
         csv_filepath: str,
         parquet_filepath: str,
@@ -31,6 +23,16 @@ def population_density_extraction(
     popul_dens_df['density'] = popul_dens_df[['r', 'g', 'b']].sum(axis=1)
     popul_dens_df[['density', 'lat', 'lon']].to_parquet(parquet_filepath, index=False)
 
+
+###############################################################################
+
+default_args = get_default_args()
+dag_specific_vars = Variable.get('warsaw_map_scraping', deserialize_json=True)
+
+tile_side = dag_specific_vars['tile_side']
+csv_dump_filepath = dag_specific_vars['csv_dump_filepath']
+
+###############################################################################
 
 dag = DAG(
     dag_id='warsaw_map_scraping',
@@ -53,9 +55,10 @@ warsaw_map_scraping_task = BashOperator(
 population_density_extraction_task = PythonOperator(
     dag=dag,
     task_id='population_density_extraction_task',
-    python_callable=lambda: population_density_extraction(
-        csv_dump_filepath,
-        parquet_dump_filepath,
+    python_callable=population_density_extraction,
+    op_kwargs=dict(
+        csv_dump_filepath=csv_dump_filepath,
+        parquet_dump_filepath=dag_specific_vars['parquet_dump_filepath'],
     ),
 )
 

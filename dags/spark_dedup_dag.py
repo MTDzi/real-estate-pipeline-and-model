@@ -6,30 +6,12 @@ from airflow.operators.python_operator import PythonOperator
 from args_utils import get_default_args
 from spark_dedup import add_increment
 
-import pandas as pd
 from pathlib import Path
 
 import pyspark
 from pyspark.sql import SQLContext
 
 import logging
-
-
-default_args = get_default_args()
-
-dag_specific_vars = Variable.get('spark_dedup', deserialize_json=True)
-
-city = dag_specific_vars['city']
-parquet_input_path = dag_specific_vars['parquet_input_path']
-parquet_output_path = dag_specific_vars['parquet_output_path']
-
-dag_specific_vars['schedule_interval'] = '@weekly'
-default_args['start_date'] = datetime(2019, 12, 16)
-# default_args['end_date'] = datetime(2019, 12, 31)
-default_args['retries'] = 0
-default_args['max_active_runs'] = 1
-dag_specific_vars['catchup'] = True
-
 
 
 def rm_tree(pth: Path) -> None:
@@ -124,12 +106,15 @@ def spark_merge_deduplicated_rows(
     sc.stop()
 
 
+default_args = get_default_args()
+dag_specific_vars = Variable.get('spark_dedup', deserialize_json=True)
+
 dag = DAG(
     'spark_dedup_dag',
     default_args=default_args,
     description='Combine scraped data into a deduplicated .parquet file',
     schedule_interval=dag_specific_vars['schedule_interval'],
-    max_active_runs=1,
+    max_active_runs=dag_specific_vars['max_active_runs'],  # This is important, the DAG runs MUST be consecutive
 )
 
 spark_merge_deduplicated_rows_task = PythonOperator(
@@ -138,8 +123,8 @@ spark_merge_deduplicated_rows_task = PythonOperator(
     provide_context=True,
     python_callable=spark_merge_deduplicated_rows,
     op_kwargs=dict(
-        parquet_input_path=parquet_input_path,
-        parquet_output_path=parquet_output_path,
-        city=city,
+        parquet_input_path=dag_specific_vars['parquet_input_path'],
+        parquet_output_path=dag_specific_vars['parquet_output_path'],
+        city=dag_specific_vars['city'],
     ),
 )

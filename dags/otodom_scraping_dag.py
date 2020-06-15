@@ -1,7 +1,4 @@
-from datetime import datetime
-
 from airflow.models import DAG, Variable
-from airflow.operators.bash_operator import BashOperator
 from airflow.operators.python_operator import PythonOperator
 
 from args_utils import get_default_args
@@ -11,40 +8,31 @@ from rough_join import find_closest_density
 import numpy as np
 import pandas as pd
 from pathlib import Path
+import subprocess
 
 import logging
 
 
-default_args = get_default_args()
+def call_scrapy_for_otodom(
+    csv_path: str,
+    city: str,
+    ds: str,
+    **kwargs,
+) -> None:
+    logging.info()
+    year_month_day = ds.replace('-', '')
+    csv_filepath = Path(csv_path) / f'{city}_{year_month_day}.csv'
+    if Path(csv_filepath).exists():
+        logging.info(
+            f'File "{csv_filepath}" exists, no more scraping today'
+            ' (you can delete the file manually and re-run)'
+        )
 
-# The DAG will need the following file to exist at later tasks, it doesn't
-#  make sense to run the scraping if the file doesn't exist
-required_warsaw_map_parquet_filepath = Variable.get(
-    'warsaw_map_scraping',
-    deserialize_json=True,
-)['parquet_dump_filepath']
-
-dag_specific_vars = Variable.get('otodom_scraping', deserialize_json=True)
-
-city = dag_specific_vars['city']
-csv_path = dag_specific_vars['csv_path']
-
-parquet_path = dag_specific_vars['parquet_path']
-
-critical_null_percentage = dag_specific_vars['critical_null_percentage']
-warning_null_percentage = dag_specific_vars['warning_null_percentage']
-
-
-
-critical_null_percentage = 101
-default_args['start_date'] = datetime(2020, 1, 8)
-default_args['end_date'] = datetime(2020, 1, 10)
-default_args['retries'] = 0
-dag_specific_vars['schedule_interval'] = '@daily'
-dag_specific_vars['catchup'] = True
-
-
-
+    subprocess.call([
+        'cd',
+        '/usr/local/airflow/otodom_scraper/;../scraper_venv/bin/scrapy',
+        f'crawl otodomSpider -o {csv_filepath} -a city={city} &> /dev/null;',
+    ])
 
 
 def csv_dedup_and_to_parquet(
@@ -189,10 +177,35 @@ def column_selection(
     df.to_parquet(parquet_filepath, index=False)
 
 
+###############################################################################
+
+default_args = get_default_args()
+
+# The DAG will need the following file to exist at later tasks, it doesn't
+#  make sense to run the scraping if the file doesn't exist
+required_warsaw_map_parquet_filepath = Variable.get(
+    'warsaw_map_scraping',
+    deserialize_json=True,
+)['parquet_dump_filepath']
+
+dag_specific_vars = Variable.get('otodom_scraping', deserialize_json=True)
+
+
+city = dag_specific_vars['city']
+csv_path = dag_specific_vars['csv_path']
+
+parquet_path = dag_specific_vars['parquet_path']
+
+critical_null_percentage = dag_specific_vars['critical_null_percentage']
+warning_null_percentage = dag_specific_vars['warning_null_percentage']
+
+
+###############################################################################
+
 dag = DAG(
     'otodom_scraping_dag',
     default_args=default_args,
-    description='Scrape real estate data from otodom.pl',
+    description='Scrape real estate data from otodom.pl and process the data',
     schedule_interval=dag_specific_vars['schedule_interval'],
 )
 
@@ -206,16 +219,15 @@ check_if_file_exists_task = PythonOperator(
     )
 )
 
-otodom_scraping_task = BashOperator(
+otodom_scraping_task = PythonOperator(
     dag=dag,
     task_id='otodom_scraping_task',
-    bash_command=(
-        'echo "siema"'
-        # f'if test -f {csv_filepath};'
-        # f'then echo "The file {csv_filepath} exists, not scraping otodom";'
-        # f'else #cd /usr/local/airflow/otodom_scraper/;../scraper_venv/bin/scrapy crawl otodomSpider -o {csv_filepath} -a city={city} &> /dev/null;'
-        # f'fi'
-    ),
+    provide_context=True,
+    python_callable=call_scrapy_for_otodom,
+    op_kwargs=dict(
+        csv_path=dag_specific_vars['csv_path'],
+        city=dag_specific_vars['city'],
+    )
 )
 
 csv_dedup_and_to_parquet_task = PythonOperator(
@@ -224,9 +236,9 @@ csv_dedup_and_to_parquet_task = PythonOperator(
     provide_context=True,
     python_callable=csv_dedup_and_to_parquet,
     op_kwargs=dict(
-        csv_path=csv_path,
-        city=city,
-        parquet_path=parquet_path,
+        csv_path=dag_specific_vars['csv_path'],
+        city=dag_specific_vars['city'],
+        parquet_path=dag_specific_vars['parquet_path'],
     ),
 )
 
@@ -236,9 +248,9 @@ lat_lon_cleanup_task = PythonOperator(
     provide_context=True,
     python_callable=lat_lon_cleanup,
     op_kwargs=dict(
-        csv_path=csv_path,
-        city=city,
-        parquet_path=parquet_path,
+        csv_path=dag_specific_vars['csv_path'],
+        city=dag_specific_vars['city'],
+        parquet_path=dag_specific_vars['parquet_path'],
     ),
 )
 
@@ -248,8 +260,8 @@ check_nullability_task = PythonOperator(
     provide_context=True,
     python_callable=check_nullability,
     op_kwargs=dict(
-        parquet_path=parquet_path,
-        city=city,
+        parquet_path=dag_specific_vars['parquet_path'],
+        city=dag_specific_vars['city'],
         critical_null_percentage=critical_null_percentage,
         warning_null_percentage=warning_null_percentage,
     ),
@@ -261,8 +273,8 @@ rough_join_with_map_data_task = PythonOperator(
     provide_context=True,
     python_callable=rough_join_with_map_data,
     op_kwargs=dict(
-        parquet_path=parquet_path,
-        city=city,
+        parquet_path=dag_specific_vars['parquet_path'],
+        city=dag_specific_vars['city'],
         warsaw_map_parquet_filepath=required_warsaw_map_parquet_filepath,
     )
 )
@@ -273,8 +285,8 @@ column_renaming_task = PythonOperator(
     provide_context=True,
     python_callable=column_renaming,
     op_kwargs=dict(
-        parquet_path=parquet_path,
-        city=city,
+        parquet_path=dag_specific_vars['parquet_path'],
+        city=dag_specific_vars['city'],
     ),
 )
 
@@ -284,8 +296,8 @@ column_selection_task = PythonOperator(
     provide_context=True,
     python_callable=column_selection,
     op_kwargs=dict(
-        parquet_path=parquet_path,
-        city=city,
+        parquet_path=dag_specific_vars['parquet_path'],
+        city=dag_specific_vars['city'],
     ),
 )
 
