@@ -85,6 +85,7 @@ RUN set -ex \
     && pip install ipython==7.13.0 \
     && pip install boto3==1.12.41 \
     && pip install sagemaker==1.55.4 \
+    && pip install py4j==0.10.7 \
     && pip install pyarrow==0.17.1 \
     # Below, I'm not specifying the version intentionally so that any
     #  critical security updates are incorporated. The version that I worked with

@@ -8,6 +8,7 @@ from args_utils import get_default_args
 from quality_checks import check_nullability, check_if_file_exists
 from rough_join import find_closest_density
 
+import numpy as np
 import pandas as pd
 from pathlib import Path
 
@@ -27,19 +28,31 @@ dag_specific_vars = Variable.get('otodom_scraping', deserialize_json=True)
 
 city = dag_specific_vars['city']
 csv_path = dag_specific_vars['csv_path']
-year_month_day = datetime.now().strftime('%Y%m%d')
-csv_filepath = Path(csv_path) / f'{city}_{year_month_day}.csv'
 
 parquet_path = dag_specific_vars['parquet_path']
-parquet_filepath = Path(parquet_path) / f'{city}_{year_month_day}.parquet'
 
 critical_null_percentage = dag_specific_vars['critical_null_percentage']
 warning_null_percentage = dag_specific_vars['warning_null_percentage']
 
 
+
+critical_null_percentage = 101
+default_args['start_date'] = datetime(2020, 1, 8)
+default_args['end_date'] = datetime(2020, 1, 10)
+default_args['retries'] = 0
+dag_specific_vars['schedule_interval'] = '@daily'
+dag_specific_vars['catchup'] = True
+
+
+
+
+
 def csv_dedup_and_to_parquet(
-    csv_filepath: Path,
-    parquet_filepath: Path,
+    csv_path: str,
+    city: str,
+    parquet_path: str,
+    ds: str,
+    **kwargs,
 ) -> None:
     """
     For whatever reason the sqlContext.read.csv function reads in a malformed
@@ -50,12 +63,15 @@ def csv_dedup_and_to_parquet(
         3) de-duplicate rows
         3) save the frame as a .parquet file
     """
+    year_month_day = ds.replace('-', '')
+    csv_filepath = Path(csv_path) / f'{city}_{year_month_day}.csv'
     logging.info(f'Reading in the {csv_filepath} frame')
     df_from_csv = pd.read_csv(csv_filepath)
     object_columns = df_from_csv.select_dtypes(include='object').columns
     df_from_csv[object_columns] = df_from_csv[object_columns].applymap(str)
     df_from_csv = df_from_csv.drop_duplicates()
 
+    parquet_filepath = Path(parquet_path) / f'{city}_{year_month_day}.parquet'
     logging.info(f'Dumping deduplicated frame to: {parquet_filepath}')
     df_from_csv.to_parquet(
         parquet_filepath,
@@ -63,23 +79,55 @@ def csv_dedup_and_to_parquet(
     )
 
 
+def lat_lon_cleanup(
+    parquet_path: str,
+    city: str,
+    ds: str,
+    **kwargs,
+):
+    logging.info('Reading in the otodom and the warsaw map parquet files')
+    year_month_day = ds.replace('-', '')
+    parquet_filepath = Path(parquet_path) / f'{city}_{year_month_day}.parquet'
+    df = pd.read_parquet(parquet_filepath)
+
+    def cast_to_float_or_nan(x):
+        try:
+            return float(x)
+        except ValueError:
+            return np.nan
+
+    for col in ['lat', 'lon']:
+        df[col] = df[col].apply(cast_to_float_or_nan)
+    df.to_parquet(parquet_filepath, index=False)
+
+
 def rough_join_with_map_data(
-    otodom_scrape_parquet_filepath: Path,
+    parquet_path: str,
+    city: str,
     warsaw_map_parquet_filepath: Path,
+    ds: str,
+    **kwargs,
 ) -> None:
     logging.info('Reading in the otodom and the warsaw map parquet files')
-    otodom_df = pd.read_parquet(otodom_scrape_parquet_filepath)
+    year_month_day = ds.replace('-', '')
+    parquet_filepath = Path(parquet_path) / f'{city}_{year_month_day}.parquet'
+    otodom_df = pd.read_parquet(parquet_filepath)
     popul_dens_df = pd.read_parquet(warsaw_map_parquet_filepath)
     logging.info('Adding the "population_density" column to the otodom frame')
     otodom_df['population_density'] = (
         otodom_df[['lon', 'lat']]
         .apply(lambda row: find_closest_density(row, popul_dens_df), axis=1)
     )
-    logging.info(f'Done, now saving the results to {otodom_scrape_parquet_filepath}')
-    otodom_df.to_parquet(otodom_scrape_parquet_filepath, index=False)
+    logging.info(f'Done, now saving the results to {parquet_filepath}')
+    otodom_df.to_parquet(parquet_filepath, index=False)
 
 
-def column_renaming(parquet_filepath: Path) -> None:
+def column_renaming(
+        parquet_path: str,
+        city: str,
+        ds: str,
+        **kwargs,
+) -> None:
     column_name_translation = {
         'balkon': 'balcony',
         'cena': 'price',
@@ -113,23 +161,32 @@ def column_renaming(parquet_filepath: Path) -> None:
         'tytul': 'title',
         'winda': 'elevator',
     }
+    year_month_day = ds.replace('-', '')
+    parquet_filepath = Path(parquet_path) / f'{city}_{year_month_day}.parquet'
     df = pd.read_parquet(parquet_filepath)
     df.rename(columns=column_name_translation, inplace=True)
-    df.to_parquet(parquet_filepath)
+    df.to_parquet(parquet_filepath, index=False)
 
 
-def column_selection(parquet_filepath: Path) -> None:
+def column_selection(
+        parquet_path: str,
+        city: str,
+        ds: str,
+        **kwargs
+) -> None:
     """
     This function drops descriptive columns, meaning: those on which I would need
     to use some more sophisticated NLP methods to extract any useful information.
     """
     columns_to_drop = [
-        'opis',
+        'description',
         'title',
     ]
+    year_month_day = ds.replace('-', '')
+    parquet_filepath = Path(parquet_path) / f'{city}_{year_month_day}.parquet'
     df = pd.read_parquet(parquet_filepath)
     df.drop(columns_to_drop, axis=1, inplace=True)
-    df.to_parquet(parquet_filepath)
+    df.to_parquet(parquet_filepath, index=False)
 
 
 dag = DAG(
@@ -142,63 +199,100 @@ dag = DAG(
 check_if_file_exists_task = PythonOperator(
     dag=dag,
     task_id='check_if_file_exists_task',
-    python_callable=lambda: check_if_file_exists(
-        required_warsaw_map_parquet_filepath,
+    python_callable=check_if_file_exists,
+    op_kwargs=dict(
+        filepath=required_warsaw_map_parquet_filepath,
         additional_message='!!! You should first run the "warsaw_map_scraping_dag" !!!\n',
-    ),
+    )
 )
 
 otodom_scraping_task = BashOperator(
     dag=dag,
     task_id='otodom_scraping_task',
     bash_command=(
-        f'if test -f {csv_filepath};'
-        f'then echo "The file {csv_filepath} exists, not scraping otodom";'
-        f'else cd /usr/local/airflow/otodom_scraper/;../scraper_venv/bin/scrapy crawl otodomSpider -o {csv_filepath} -a city={city} &> /dev/null;'
-        f'fi'
+        'echo "siema"'
+        # f'if test -f {csv_filepath};'
+        # f'then echo "The file {csv_filepath} exists, not scraping otodom";'
+        # f'else #cd /usr/local/airflow/otodom_scraper/;../scraper_venv/bin/scrapy crawl otodomSpider -o {csv_filepath} -a city={city} &> /dev/null;'
+        # f'fi'
     ),
 )
 
 csv_dedup_and_to_parquet_task = PythonOperator(
     dag=dag,
     task_id='csv_dedup_and_to_parquet_task',
-    python_callable=lambda: csv_dedup_and_to_parquet(csv_filepath, parquet_filepath),
+    provide_context=True,
+    python_callable=csv_dedup_and_to_parquet,
+    op_kwargs=dict(
+        csv_path=csv_path,
+        city=city,
+        parquet_path=parquet_path,
+    ),
+)
+
+lat_lon_cleanup_task = PythonOperator(
+    dag=dag,
+    task_id='lat_lon_cleanup_task',
+    provide_context=True,
+    python_callable=lat_lon_cleanup,
+    op_kwargs=dict(
+        csv_path=csv_path,
+        city=city,
+        parquet_path=parquet_path,
+    ),
 )
 
 check_nullability_task = PythonOperator(
     dag=dag,
     task_id='check_nullability_task',
-    python_callable=lambda: check_nullability(
-        parquet_filepath,
-        critical_null_percentage,
-        warning_null_percentage,
+    provide_context=True,
+    python_callable=check_nullability,
+    op_kwargs=dict(
+        parquet_path=parquet_path,
+        city=city,
+        critical_null_percentage=critical_null_percentage,
+        warning_null_percentage=warning_null_percentage,
     ),
 )
 
 rough_join_with_map_data_task = PythonOperator(
     dag=dag,
     task_id='rough_join_with_map_data_task',
-    python_callable=lambda: rough_join_with_map_data(
-        parquet_filepath,
-        required_warsaw_map_parquet_filepath,
+    provide_context=True,
+    python_callable=rough_join_with_map_data,
+    op_kwargs=dict(
+        parquet_path=parquet_path,
+        city=city,
+        warsaw_map_parquet_filepath=required_warsaw_map_parquet_filepath,
     )
 )
 
 column_renaming_task = PythonOperator(
     dag=dag,
     task_id='column_renaming_task',
-    python_callable=lambda: column_renaming(parquet_filepath),
+    provide_context=True,
+    python_callable=column_renaming,
+    op_kwargs=dict(
+        parquet_path=parquet_path,
+        city=city,
+    ),
 )
 
 column_selection_task = PythonOperator(
     dag=dag,
     task_id='column_selection_task',
-    python_callable=lambda: column_selection(parquet_filepath),
+    provide_context=True,
+    python_callable=column_selection,
+    op_kwargs=dict(
+        parquet_path=parquet_path,
+        city=city,
+    ),
 )
 
 check_if_file_exists_task \
     >> otodom_scraping_task \
     >> csv_dedup_and_to_parquet_task \
+    >> lat_lon_cleanup_task \
     >> check_nullability_task \
     >> rough_join_with_map_data_task \
     >> column_renaming_task \

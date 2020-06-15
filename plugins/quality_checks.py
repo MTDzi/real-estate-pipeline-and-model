@@ -9,9 +9,12 @@ def check_if_file_exists(filepath: str, additional_message: str = '') -> None:
 
 
 def check_nullability(
-        parquet_filepath: Path,
+        parquet_path: Path,
+        city: str,
         critical_null_percentage: float,
         warning_null_percentage: float,
+        ds: str,
+        **kwargs,
 ) -> None:
     """
     This function:
@@ -20,6 +23,8 @@ def check_nullability(
         3) checks which (if any) columns have more than critica_null_percentage null values
         4)  checks which (if any) columns have more than warning_null_percentage null values
     """
+    year_month_day = ds.replace('-', '')
+    parquet_filepath = Path(parquet_path) / f'{city}_{year_month_day}.parquet'
     df = pd.read_parquet(parquet_filepath)
     null_percentages_per_column = 100 * df.isnull().mean().round(2)
     above_critical = (null_percentages_per_column > critical_null_percentage)

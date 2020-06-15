@@ -18,6 +18,9 @@ def find_closest_density(
     to signify that no density was found near by.
     """
     lon, lat = row[['lon', 'lat']]
+    if np.isnan(lat) or np.isnan(lon):
+        return -1
+
     lon_interval = (popul_dens_df['lon'] > lon - delta) & (popul_dens_df['lon'] < lon + delta)
     lat_interval = (popul_dens_df['lat'] > lat - delta) & (popul_dens_df['lat'] < lat + delta)
     candidates = popul_dens_df[lon_interval & lat_interval]

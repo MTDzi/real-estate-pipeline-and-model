@@ -12,12 +12,15 @@
 
   "otodom_scraping": {
     "schedule_interval": "@daily",
+
     "city": "Warszawa",
     "csv_path": "/usr/local/airflow/scraped_csvs/",
     "parquet_path": "/usr/local/airflow/scraped_csvs/parquets/",
-    "s3_bucket": "real-estate-project",
+
     "critical_null_percentage": 90,
-    "warning_null_percentage": 50
+    "warning_null_percentage": 50,
+
+    "catchup": false
   },
 
   "warsaw_map_scraping": {
@@ -31,6 +34,17 @@
     "csv_dump_filepath": "/usr/local/airflow/scraped_csvs/warsaw_map_population_density.csv",
     "parquet_dump_filepath": "/usr/local/airflow/scraped_csvs/parquets/warsaw_map_population_density.parquet",
 
-    "s3_bucket": "real-estate-project"
+    "catchup": false
+  },
+
+  "spark_dedup": {
+    "schedule_interval": "@weekly",
+
+    "city": "Warszawa",
+    "parquet_input_path": "/usr/local/airflow/scraped_csvs/parquets/",
+    "parquet_output_path": "/usr/local/airflow/scraped_csvs/parquets/deduplicated/",
+
+    "max_active_runs": 1,
+    "catchup": true
   }
 }

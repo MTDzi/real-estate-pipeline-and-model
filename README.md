@@ -13,12 +13,11 @@ This project is comprised of three main components which correspond to three Air
 2. An on-demand pipeline for scraping the **`mapa.um.warszawa.pl`** website. This is a simple DAG, comprised of two tasks:
    the first one scrapes the website using the Python `requests` package, and the second task cleans up the data and dumps
    them into a .parquet file. This is the DAG as seen in Airflow's Graph View ![](images/warsaw_map_dag.png)
-3. A weekly pipeline defined in `dags/emr_cleanup_dag.py` that spins up an EMR cluster on which several Spark
-   jobs are ran that clean up the data, find and remove duplicates, and load the data back to the S3 data lake.
-3. An on-demand pipeline for training a model defined in `dags/training_dag.py` whose primary purpose is *not* to train a
-   model, but rather to create an analysis based on the embeddings that this model provides. 
+3. A weekly pipeline defined in `dags/spark_dedup_dag.py` that takes the .parquet files produced thus far, and combines
+   them into a single .parquet file with deduplicated rows (using the `link` column). TODO: This is how... 
 
-More details about each of this components are given below.
+More details about each of this components are given in the sections that follow, but first, we take a look
+at some basic setup instructions.
 
 ## How to build the `docker-airflow` image
 
@@ -30,11 +29,10 @@ In this repo's main directory run:
     git submodule update
     
 to get the `otodom_scraper` repo which contains scripts for scraping the real estate data. BTW, I'm running the scraper
-by using the `BashOperator`, which in turn needs to run within a virtualenv (that contains scrapy, for example) which is
-being set up in the Dockerfile.
+by using the `BashOperator`, which in turn needs to run within a virtualenv (that contains `scrapy`, for example) -- for
+details refer to the Dockerfile and the `dags/otodom_scraping_dag.py` script.
 
-Since I'm using the [`airflow.providers.amazon.aws`](https://airflow.readthedocs.io/en/latest/_api/airflow/providers/amazon/aws/operators/index.html),
-subpackage, I'm building the image with an additional `AIRFLOW_DEPS`, like so: 
+The `docker build` command can be found in the `all_in_one.sh` script, but this is its rough layout: 
 
     docker build \
         --rm \
@@ -43,27 +41,15 @@ subpackage, I'm building the image with an additional `AIRFLOW_DEPS`, like so:
         --build-arg AIRFLOW_UI_PASSWORD="some_password" \
         -t puckel/docker-airflow .
     
-
-## IaC for setting up the Redshift service
-
-I used the `exploration.ipynb` notebook (which I took from my solution [here](https://github.com/MTDzi/data_nanodegree_project_3))
-for setting up Redshift, the tables, as well as deleting the Redshift cluster
-once everything is done (although in the end it was easier to just kill the cluster in the AWS console).
+The "some_user_name" and its corresponding password "some_password" will be needed for logging in into Airflow.
 
 ## Get it to run
 
-There's a script, `all_in_one.sh`, that does all the work, please check it out to see the steps.
-However, that's not all, you'll still need to set up the connections in the Airflow UI.
-Initially, my plan was to have those connections defined in a file of sorts but thus far I've failed to find
-a secure way of doing that, so I left that as a future improvement.
-
-Before running the main DAG, in the Airflow UI you need to:
- 1. Define a `"aws_default"` connection
- 2. Define a `"redshift"` connection
- 
-And after that, turn the DAG "On", and click "Toggle DAG", and... that's pretty
+There's a script, `all_in_one.sh`, that does all the work, check it out to see the steps.
 
 **What follows is the original README from the `puckle/docker-airflow` repo.**
+
+---
 
 # docker-airflow
 [![CI status](https://github.com/puckel/docker-airflow/workflows/CI/badge.svg?branch=master)](https://github.com/puckel/docker-airflow/actions?query=workflow%3ACI+branch%3Amaster+event%3Apush)
