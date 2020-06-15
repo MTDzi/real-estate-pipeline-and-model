@@ -1,4 +1,4 @@
-**NOTE:** this repo is actually a copy of the [`puckel/docker-airflow`](https://github.com/puckel/docker-airflow)
+**NOTE:** this repo is actually a copy (*not* a fork) of the [`puckel/docker-airflow`](https://github.com/puckel/docker-airflow)
 project, however since I had one [other](https://github.com/MTDzi/data_nanodegree_project_5) repo that's also its fork,
 and I didn't want this project to be merely a branch of that other repo, I made a hard copy and
 now you're looking at it.
@@ -7,13 +7,14 @@ now you're looking at it.
 
 This project is comprised of three main components which correspond to three Airflow DAGs:
 1. A daily scraping job defined in `dags/otodom_scraping_dag.py` that scrapes the **`otodom.pl`** website for real estate
-   deals in Warsaw (Poland). The result of this scraping is a CSV file that is then de-duplicated, cleaned up, joined with
-   dataset containing population density, and finally the resulting data frame has its columns renamed (translated to English),
+   deals in Warsaw (Poland). The result of this scraping is a CSV file that is then de-duplicated, cleaned up, checked for quality,
+   joined with a
+   dataset containing population density (see point 2.), and finally the resulting data frame has its columns renamed (translated to English),
    to then be dumped as a .parquet file. Each CSV is roughly ~30MB large, and contains about 30.000 rows of data.
    This is the DAG as seen in Airflow's Graph View ![](images/otodom_dag.png)
-2. An on-demand pipeline for scraping the **`mapa.um.warszawa.pl`** website. This is a simple DAG, comprised of two tasks:
-   the first one scrapes the website using the Python `requests` package, and the second task cleans up the data and dumps
-   them into a .parquet file.
+2. An on-demand pipeline for scraping the **`mapa.um.warszawa.pl`** website. This is a simple DAG, comprising two tasks:
+   the first one scrapes the website using the Python `requests` package, and the second that does a quality check and 
+   cleans up the data to then finally dump it into a .parquet file.
    This is the DAG as seen in Airflow's Graph View ![](images/warsaw_map_dag.png)
 3. A weekly pipeline defined in `dags/spark_dedup_dag.py` that takes the .parquet files produced thus far, and combines
    them into a single .parquet file with deduplicated rows (using the `link` column).
@@ -24,6 +25,11 @@ The purpose of this project was to create a pipeline that scrapes data from two 
 and stores to be then used to train a machine learning model that, for example, assesses the price of a real estate.
 The data are also deduplicated using Spark (which was needed since the whole data no longer fits in memory), and eventually
 stored as a single frame, again, in a .parquet file.
+
+The data are scraped daily, and as of writing this I have data from about 90 days (70 of those scraped manually, and the
+remaining 20 scraped automatically by Airflow), which amounts to about 90 x 30.000 = 2.700.000 rows.
+After deduplication this number shrinks to about 40.000,  
+
    
 ## Data model
 The data model is a single table stored as a .parquet file in a data lake that has the following layout (this is a transposed view generated
@@ -78,10 +84,10 @@ to this project this shouldn't be a problem.
 
 For the second stage, the duplication is being done on Spark DataFrames, where one of those frames comprises
 data coming from a one day scrape of the otodom.pl website, and the second is the combined data thus far.
-The firs frame is, again, about ~30MB in size, and the second is constantly growing, and currently is at about 500MB.
+The firs frame is, again, about ~30MB in size, and the second is constantly growing, and currently is at about 45MB.
 On the one hand, Spark can easily deal with this amount of data, and even if we had to process correspondingly
-~3GB and 50GB of data, this would not be an issue. One the other hand, the current approach is not optimal
-and can be made more efficient by using the [Delta Lake](https://docs.databricks.com/delta/delta-intro.html) Spark library.
+~3GB and 4.5GB of data, this would not be an issue. One the other hand, the current approach is not optimal
+and can be made more efficient by using the [Delta Lake](https://docs.databricks.com/delta/delta-intro.html) library.
 
 ### What if the pipeline were to run every day, at 7 am?
 This is not a problem since I used Airflow for scheduling.
@@ -98,13 +104,14 @@ The scraped CSV files and processed .parquet files are stored locally, instead o
 Also, the Spark job is being done locally, within the container.
 
 Future work includes:
+
 0. Using Data Lakes for the Spark upsert job
 1. Pushing the resulting .parquet files to an actual S3 bucket
 2. Spinning up an EMR cluster for running the spark job for deduplication
 3. Deploying Airflow to ECS and have the whole scheduling done on cloud
    
-As mentioned, I wanted to avoid additional costs, but the solution was implemented with these three steps in mind.
-The most difficult part would be the 3rd point.
+As mentioned, I wanted to avoid additional costs, but the solution was implemented with the last three steps in mind.
+The most difficult part would be deploying Airflow to ECS, I think, because both points 1. and 2. were already done in the course.
 
 For now, my plan is to share this solution with others in a blog post, and then expand on it by moving it step-by-step
 to the cloud.
